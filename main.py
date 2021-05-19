@@ -27,8 +27,10 @@ def get_internal_alarms():
 
 @app.route("/public/alarms")
 def get_public_alarms():
+    #TODO - Optimize oref url & modes
+    oref_url = 'https://www.oref.org.il/Shared/Ajax/GetAlarmsHistory.aspx?lang=he&mode='
     oref_mode: int = 0
-    oref_url = 'https://www.oref.org.il//Shared/Ajax/GetAlarmsHistory.aspx?lang=he&mode=' + str(oref_mode)
+    is_custom: bool = False
     mode = request.args.get('mode')
     if mode:
         if mode == "day":
@@ -38,18 +40,25 @@ def get_public_alarms():
         elif mode == "month":
             oref_mode = 3
         elif mode == "custom":
+            is_custom = True
             start_day_filter = request.args.get('from')
             end_day_filter = request.args.get('to')
             if start_day_filter and end_day_filter:
-                oref_url = oref_url + '&fromDate=' + start_day_filter + '&toDate=' + end_day_filter
+                oref_url = oref_url + str(oref_mode) + '&fromDate=' + start_day_filter + '&toDate=' + end_day_filter
             else:
                 return abort(400, "Missing query parameters")
         else:
             return abort(400, ("Received mode is not supported"))
+        if not is_custom:
+            oref_url = oref_url + str(oref_mode)
 
     res = requests.get(oref_url)
     res_text = str(res.content, 'utf-8')
-
+    
+    #TODO - Better handling for invalid queries / no data
+    if res_text == '' or res_text == '[]':
+        return abort(400, "No data")
+    
     schema = PublicHistorySchema(many=True)
     result = schema.loads(res_text)
 
@@ -80,19 +89,18 @@ def get_public_alarm_updates():
     res = requests.get('https://www.oref.org.il/WarningMessages/alert/alerts.json', headers=headers)
 
     res_text = str(res.content, 'utf-8')
-
+    #res_text = '{    "data": [        "באר שבע - מזרח",        "לקיה והפזורה",        "שגב שלום והפזורה",        "אבו-תלול והפזורה",        "מולדה, אל-סייד והפזורה",        "אום בטין והפזורה"    ],    "id": 1621170743649,    "title": "התרעות פיקוד העורף"}'
     if res_text != '':
-        schema = PublicUpdatesSchema(many=True)
+        schema = PublicUpdatesSchema()
         result = schema.loads(res_text)
     
         api_alarms: List[ApiAlarm] = []
 
         if result:
-            for item in result:
-                for data in item['data']:
-                    api_alarms.append(ApiAlarm(data, datetime.now()))
+            for item in result['data']:
+                api_alarms.append(ApiAlarm(item, datetime.now()))
 
-        return ApiAlarmSchema().dumps(api_alarms, many=True)
+        return ApiAlarmSchema().dumps(api_alarms, many=True, ensure_ascii=False).encode('utf8')
 
     return jsonify(res_text if res_text else None)
     
